@@ -1,0 +1,484 @@
+---
+title: "Lista 2 - Questão 1 e 2"
+author: "Camila Pinheiro, Fernando Moraes e Michele Sacramento"
+output:
+  html_document:
+    df_print: paged
+---
+Questão 1) Implemente uma função no R que recebe como
+	argumentos x.train, y.train, x.test e k
+	e que retorna como solução o estimador do KNN para cada elemento do conjunto de teste usando k vizinhos.
+	Compare a velocidade de sua função com a função \verb|FNN::knn.reg| em um problema com $n.train=1000$ e $d=20$.
+	Sugestão: para calcular distâncias, use a função \verb|fields::rdist|.
+	
+	
+Primeiramente iremos gerar os dados, serão gerados 1429 observações que serão divididas em 1000 (70%) para treinamento e 429 (30%) para teste, para isso utilizamos a geração de dados da lista 1.	
+```{r,warning=FALSE}
+geradados=function(n,d){
+  matrixdosdados= matrix(nrow=n,ncol=d)
+  matrixdosdados[,1]=rep(1,n)
+  for (i in 1:d) {
+    matrixdosdados[,i]=rnorm(n,0,1)
+  }
+  return(matrixdosdados)
+}
+n=1429
+X<-geradados(1429,20)
+n<-1429
+Betas.est<-c(2,-5,-3,5,7,8,3,2,-4,-5,8,-9,2,-5,-3,3,2,-4,-5,8) #betas dados
+Betas<-as.matrix(Betas.est) 
+std.error<-rnorm(n,0,1) #erro 
+X<-as.matrix(X)
+Y=X%*%Betas + std.error
+
+dados<-data.frame(Y,X)
+
+#DATA SPLITTING - HOLDOUT SIMPLES
+linha <- sample(1:nrow(dados),nrow(dados)*0.7)
+X.train <- dados[linha,]
+X.teste <- dados[-linha,]
+
+X_train <-X.train[,2:21]
+X_teste <-X.teste[,2:21]
+Y_train <-X.train[,1]
+Y_teste <-X.teste[,1]
+
+```
+
+Cronstrução da função KNN
+```{r}
+KNN=function(x.train,y.train,x.test,K){
+dist.one <-  function(x.new) {
+  D=numeric(0)
+  for (i in 1:nrow(x.train)){
+    arg=as.numeric(x.new)-as.numeric(x.train[i,-ncol(x.train)])
+    D[i] <- t(arg)%*%arg
+  }
+  return(D)
+}
+K=K
+y.ch <- numeric(0)
+for(i in 1:nrow(x.test)){
+  Dist <- dist.one(x.test[i,-ncol(x.test)])
+  dist.menores <- sort(Dist)[1:K]
+  ind.n <- 1:nrow(x.train)
+  ind<-ind.n[Dist<=dist.menores[K]]
+  
+  y.ch[i]=mean(y.train[ind])
+  
+}
+return(y.ch)
+}
+pred=KNN(X_train,Y_train,X_teste,5)
+system.time(KNN(X_train,Y_train,X_teste,5))
+mean((Y_teste-pred)^2)
+```
+
+Função knn no pacote FNN
+```{r}
+library(FNN)
+ajuste <- knn.reg(train = X_train, test = X_teste,
+                  y = Y_train, k = 5)
+
+system.time(knn.reg(train = X_train, test = X_teste,y = Y_train, k = 5))
+predito <- ajuste$pred
+sum((predito - Y_teste)^2)/429
+```
+
+	
+Questão 2) Neste exercício você irá implementar algumas técnicas vistas em aula para o banco de dados das faces
+	(\url{https://www.dropbox.com/s/mja18qcwu7yex0z/dadosFacesAltaResolucao.txt}).
+	O objetivo aqui é conseguir criar uma função que consiga predizer para onde uma pessoa
+	está olhando com base em uma foto.
+	Iremos aplicar o KNN para esses dados, assim como
+	uma regressão linear e florestas aleatórias. Como 
+	não é possível usar o método dos mínimos quadrados quando o número de covariáveis  é maior que o número de observações,
+	para esta segunda etapa iremos usar o lasso. Você pode usar funções prontas do R neste exercício.
+	
+a)	Leia o banco \verb|dadosFacesAltaResolucao.txt|. A primeira coluna deste banco contém a variável
+		que indica a direção para a qual o indivíduo na imagem está olhando. As outras covariáveis contém os pixels
+		relativos a essa imagem, que possui dimensão 64 por 64. Utilizando o comando \verb|image|, plote 5 imagens deste banco.
+		
+		Divida o conjunto fornecido em treinamento (aproximadamente 60\%  das observaçoes), validação 
+		(aproximadamente 20\%  das observaçoes)
+		e teste (aproximadamente 20\% das observaçoes). 
+		Utilizaremos o conjunto de treinamento e validação para ajustar os modelos. O conjunto de teste será utilizado para testar sua performance.
+	
+```{r,warning=FALSE}
+library(tm)
+library(readr)
+dados <- read_table2("C:/Users/ferna/Downloads/dadosFacesAltaResolucao.txt")
+
+m1=matrix(c(dados[1,2:4097]),64,64)
+mode(m1) = "numeric"
+image(m1)
+
+m2=matrix(c(dados[2,2:4097]),64,64)
+mode(m2) = "numeric"
+image(m2)
+
+m3=matrix(c(dados[3,2:4097]),64,64)
+mode(m3) = "numeric"
+image(m3)
+
+m4=matrix(c(dados[4,2:4097]),64,64)
+mode(m4) = "numeric"
+image(m4)
+
+m5=matrix(c(dados[5,2:4097]),64,64)
+mode(m5) = "numeric"
+image(m5)
+
+```
+
+```{r,warning=FALSE}
+#pacote que será utilizado
+require(MASS)
+require(dplyr)
+library(kimisc)
+
+n=nrow(dados)
+set.seed(123)
+#truncando
+n*70/100 # 488 para treinamento
+n*30/100 # 210 para teste
+
+#aleatorizando a base de dados
+
+aleat<-sample_n(dados,nrow(dados))
+
+Treino<- aleat[1:489,] # 70%
+
+teste<-aleat[490:698,] # 30%
+
+Teste<-teste[1:105,]
+
+Valid<-teste[106:209,]
+```
+
+
+ b) Qual o número de observações? Qual o número de covariáveis? O que representa cada covariável?
+ 
+ O número de observações é 698
+O número de covariáveis é 4096 que representa os pixels da imagem "64x64"
+Tem uma representação númerica que indica a intesidade da cor no pixel correspondente.
+
+
+c) Para cada observação $\x$ do conjunto de teste, calcule o estimador da função de regressão
+		$r(\x)$ dado pelo método dos k vizinhos mais próximos com $k=5$. Você pode usar as funções vistas em aula.
+		
+```{r,warning=FALSE}
+X_treino<-Treino[,2:4097]
+Y_treino<-Treino[,1]
+X_teste<-Teste[,2:4097]
+Y_teste<-Teste[,1]
+X_valid<-Valid[,2:4097]
+Y_valid<-Valid[,1]
+X_treino<-as.matrix(X_treino)
+Y_treino<-as.matrix(Y_treino)
+X_teste<-as.matrix(X_teste)
+Y_teste<-as.matrix(Y_teste)
+X_valid<-as.matrix(X_valid)
+Y_valid<-as.matrix(Y_valid)
+
+X_train_valid<-rbind(X_treino,X_valid)
+Y_train_valid<-rbind(Y_treino,Y_valid)
+
+pred_knn <- FNN::knn.reg(train = X_train_valid,y = Y_train_valid,
+                         test = X_teste,
+                         k = 5)$pred
+mean((pred_knn - Y_teste)^2)
+```
+
+
+d) Utilize validação cruzada (\emph{data splitting}) para escolher o melhor $k$.
+		Plote $k$ vs Risco estimado.
+```{r}
+##### ITEM d) ######
+# Utilize validação cruzada (data splitting) para escolher o melhor k. Plote k vs Risco estimado.
+
+# Função para seleção de indices k-folds 
+kfold = function(k,n){
+  ind = sample(1:n,n)                          # Sorteio de numeros de 1 a n
+  ind_k = matrix(ind, ncol = k, nrow = (n/k))  # Matriz de indices em que as colunas serão os indices dos folds
+  
+  return(ind_k)
+}
+
+K   <- 15   # numero maximo de vizinhos que serÃ£o usados para validaÃ§Ã£o
+k_folds <- round(nrow(X_train_valid)/2,0) # truncando o numero de k folds para não ficar decimal
+indices <- kfold(k_folds, nrow(X_train_valid))  # seleção dos indices do k-folds usando a função kfolds
+Erro_fold <- NULL
+risco <- NULL
+
+for (i in 1:K) {
+  for (j in 1:k_folds) {
+    Y <- knn.reg(train = X_train_valid[-indices[,j],], test = X_train_valid[indices[,j],],
+               y = Y_train_valid[-indices[,j]], k = i)
+    Erro_fold[j] = sum((Y$pred - Y_train_valid[indices[,j]])^2)
+  }
+  risco[i] <- sum(Erro_fold)/nrow(X_train_valid)
+}
+
+valores_K <- 1:K_max # sequencia de valores para K
+
+plot(K_cv,risco, ty = "l", xlab = "k", ylab = "Risco Quadrático")
+
+min_risco <- risco[which.min(risco)]        # Menor valor do Risco Quadratico
+melhor_K  <- valores_k[which.min(risco)]    # Valor de K que minimiza o Risco Quadratico (Melhor K)
+```
+		
+
+e) Utilizando o conjunto de teste, estime o risco (e seu erro padrão) do KNN para o melhor $k$.
+```{r,warning=FALSE}
+Mod <- knn.reg(X_treino, test = X_teste, Y_treino, k = melhor_K)
+Pred_KNN <- Mod$pred
+riscos_novo <- (Pred_KNN - Y_teste)^2
+riscos_novo
+
+risco_CV_KNN <- mean(riscos_novo) 
+risco_CV_KNN
+sd_CV_KNN <- sd(riscos_novo) 
+sd_CV_KNN
+```
+f)Ajuste uma regressão linear para os dados usando o conjunto de treinamento mais o de validação via lasso (lembre-se
+		que a função que ajusta o lasso no R já faz validação cruzada automaticamente: ao contrário do KNN, neste caso não é necessário
+		separar os dados em treinamento e validação). Qual o lambda escolhido? Plote lambda vs Risco estimado.
+		 Utilizando o conjunto de teste, estime o risco (e seu erro padrão) do lasso para o melhor lambda. 	
+```{r,warning=FALSE}
+library(glmnet)
+treino<-Treino
+valid<-Valid
+test<-Teste
+X_treino<-treino[,2:4097]
+Y_treino<-treino[,1]
+X_teste<-test[,2:4097]
+Y_teste<-test[,1]
+X_valid<-valid[,2:4097]
+Y_valid<-valid[,1]
+X_treino<-as.matrix(X_treino)
+Y_treino<-as.matrix(Y_treino)
+X_teste<-as.matrix(X_teste)
+Y_teste<-as.matrix(Y_teste)
+X_valid<-as.matrix(X_valid)
+Y_valid<-as.matrix(Y_valid)
+
+X_train_valid<-rbind(X_treino,X_valid)
+Y_train_valid<-rbind(Y_treino,Y_valid)
+
+cv_lasso=cv.glmnet(X_train_valid,Y_train_valid, alpha = 1) 
+
+nlambda <- length(cv_lasso$lambda)
+nrow(X_train_valid)
+Y_Hat  = RiscoCV = NULL
+for (i in 1:nlambda) {
+  Y_Hat <- cv_lasso$glmnet.fit$a0[i] + as.matrix(X_train_valid)%*%cv_lasso$glmnet.fit$beta[,i]
+  RiscoCV[i] <- mean((Y_Hat - Y_train_valid)^2)
+}
+cv_lasso$lambda.min # Lambda escolhido que minimiza o risco de cross validation
+
+#Plotamos os riscos para visualizar 
+DF_Risco2 <- data.frame(RiscoCV, cv_lasso$lambda)
+
+ggplot() + geom_point(data = DF_Risco2, aes(x = cv_lasso$lambda, y = RiscoCV, col = "red")) + 
+           xlab("Lambda") + ylab("Risco Quadratico") + scale_color_manual(name = "Base de Dados", labels = c("Risco Cross-Validation", "Data Splitting"), values = c("blue", "red"))
+
+
+# Agora ajustamos uma regressÃ£o Lasso com o lambda otimo encontrado na Cross Validation
+ModLasso <- glmnet(X_train_valid,Y_train_valid, alpha = 1, lambda = cv_lasso$lambda.min)
+
+#Calculamos os valores preditos do modelo com o Conjunto de Teste
+pred_Lasso <- predict(ModLasso, newx = X_teste)
+Erros <- (Y_Hat_Lasso - Y_teste)^2 # Encontramos os erros entre o predito pelo modelo Lasso e os Y Teste
+sd_Lasso <- sd(Erros) # Desvio padrÃ£o das estimativas do Lasso com o lambda otimo no conjunto de teste 
+Risco_Lasso <- mean(Erros) # Risco Quadratico do Lasso para o conjunto de teste
+
+```
+g)Ajuste uma floresta aleatória para os dados usando o conjunto de treinamento mais o de validação (lembre-se que praticamente não há tuning em florestas). Estime o risco com o teste.
+```{r,warning=FALSE}
+
+X_treino<-Treino[,2:4097]
+Y_treino<-Treino[,1]
+X_teste<-Teste[,2:4097]
+Y_teste<-Teste[,1]
+X_valid<-Valid[,2:4097]
+Y_valid<-Valid[,1]
+X_treino<-as.matrix(X_treino)
+Y_treino<-as.matrix(Y_treino)
+X_teste<-as.matrix(X_teste)
+Y_teste<-as.matrix(Y_teste)
+X_valid<-as.matrix(X_valid)
+Y_valid<-as.matrix(Y_valid)
+X_teste<-as.data.frame(X_teste)
+X_train_valid<-rbind(X_treino,X_valid)
+Y_train_valid<-rbind(Y_treino,Y_valid)
+library(rpart)
+
+fit <- randomForest(X_train_valid,Y_train_valid, X_teste, Y_teste, mtry = 3, ntree = 500)
+
+pred_RF <- fit$test$predicted
+
+Risco_RF <- mean((pred_RF - Y_teste)^2) 
+sd_RF <- sd((pred_RF - Y_teste)^2)
+
+
+```
+
+h)Ajuste uma rede neural com early-stopping. Estime o risco com o teste.
+```{r,warning=FALSE,verbose=FALSE}
+library(rsample)
+library(keras)
+library(tensorflow)
+X_treino<-Treino[,2:4097]
+Y_treino<-Treino[,1]
+X_teste<-Teste[,2:4097]
+Y_teste<-Teste[,1]
+X_valid<-Valid[,2:4097]
+Y_valid<-Valid[,1]
+X_treino<-as.matrix(X_treino)
+Y_treino<-as.matrix(Y_treino)
+X_teste<-as.matrix(X_teste)
+Y_teste<-as.matrix(Y_teste)
+X_valid<-as.matrix(X_valid)
+Y_valid<-as.matrix(Y_valid)
+X_train_valid<-rbind(X_treino,X_valid)
+Y_train_valid<-rbind(Y_treino,Y_valid)
+
+# especificação do modelo (uma rede feedforward com
+# duas camadas ocultas com 8 neuronios cada)
+modelo <- keras_model_sequential() %>%
+  layer_dense(units = 8, activation = "relu",
+              input_shape = ncol(X_train_valid)) %>%
+  layer_dense(units = 8, activation = "relu") %>%
+  layer_dense(units = 1)
+# especificação da função objetivo e como ela será minimizada
+modelo %>% compile(
+  loss = "mse",
+  optimizer = optimizer_rmsprop(),
+  metrics = list("mean_absolute_error")
+)
+historico <- modelo %>% fit(X_train_valid,Y_train_valid, 
+epochs = 200,validation_split = 0.17,callbacks=callback_early_stopping(monitor = "val_loss", patience = 15, mode = "min"),verbose = FALSE)
+library(ggplot2)
+  plot(historico, metrics = "loss") +
+    theme_bw() + theme(legend.position = "top")
+
+  # valor predito no conjunto de teste
+  predito_RN <- modelo %>%
+    predict(X_teste)
+  
+mean((predito_RN - Y_teste)^2)/length(predito)
+sd_NN <- sd((predito_RN - Y_teste))
+```
+i)Ajuste um kernel ridge regression com $\lambda$ escolhido utilizando o conjunto de validação. Estime o risco (e seu erro padrão) com o teste.
+
+```{r,warning=FALSE}
+KRR <- function(xtrain, xtest, ytrain, grau_poly = 1, lambda, metodo){
+  #Kernel Polinomial	
+  polinomial_k <- function (x, x.prime, d) {
+    return(I((1 +	x %*% x.prime)^d))		
+  };
+  #Kernel Linear
+  linear_k <-function (x,x.prime) {
+    return(x %*% x.prime)
+  };	
+  
+  #Numero de ObservaÃ§Ãµes
+  n = nrow(xtrain);	
+
+  #para polinomial
+  if (metodo == 1) {
+    K	<- polinomial_k(xtrain,t(xtrain),grau_poly);
+    k	<- polinomial_k(xtrain,t(xtest),grau_poly);
+  }
+  
+  #para linear
+  else if (metodo == 2) {
+    K	<- linear_k(xtrain,t(xtrain));
+    k	<- linear_k(xtrain,t(xtest));
+  };	
+  
+  #Calcular os y_chapeu
+  y.hat <- ytrain %*% solve(lambda*diag(n) + K) %*% k;
+  return (y.hat);
+}
+
+
+folds_KRR <- nrow(X_train_valid)/2
+indices_KRR <- KFolds_Indices(folds_KRR, nrow(X_train_valid))
+
+Erro_i_esimo_fold_KRR <- NULL
+Risco_KRR <- NULL
+lambdas = c(0.0001, 0.001, 0.01, 0.05, 0.1, 0.2, 0.30, 0.4, 0.5,0.7, 0.8, 0.9, 1, 4, 8, 10, 20, 30, 40, 5000, 50000)
+
+#lambdas2 <- 4800:5200
+# 0.01, 0.05, 0.1, 0.2, 0.4, 0.10, 0.15, 0.20, 0.30, 0.45, 0.60, 0.80, 0.90, 1, 2, 4, 8
+
+# Usando cross-validation com o conjunto de ValidaÃ§Ã£o
+# Escolheremos o melhor lambda (Aquele que minimiza o risco)
+# Dentre todos os lambdas que definimos anteriormente
+
+# Na funÃ§Ã£o KRR() colocar metodo = 1 se quiser utilizar uma Kernel Polynomial, e ingrese o grau_poly 
+# Caso quiser usar uma Kernel Linear, colocar metodo = 2
+Risco_KRR <- NULL
+for (i in 1:length(lambdas)) {
+  print(paste(lambdas[i],"\n"))
+  Y_hat_KRR<-KRR(Xtrain, Xvalid,  Ytrain[,1], lambdas[i], grau_poly =  2, metodo = 2) 
+  Risco_KRR[i] = sum((Y_hat_KRR - Yvalid[,1])^2)/nrow(Xtrain)
+}
+min(Risco_KRR)
+lambda_otimo <- lambdas[which.min(Risco_KRR)]
+
+
+#Agora usando o lambda otimo encontrado anteriormente, usamos o conjunto de teste para
+# Estimar o risco do KRR
+pred_KRR_Final <- KRR(Xtrain, Xteste,  Ytrain[,1], lambda_otimo, grau_poly =  2, metodo = 2)
+Risco_KRR_Final <- mean((Y_hat_KRR_Final[1,]-Y_teste)^2) 
+SD_KRR <-sd((Y_hat_KRR_Final[1,]-Y_teste)^2)
+```
+	
+j)Plote os valores preditos versus os valores observados para o conjunto de teste em cada um dos métodos. Inclua a reta identidade. 
+						
+```{r,warning=FALSE}
+X <- -72:75
+Y <- -72:75
+min(Y_teste)
+max(Y_teste)
+DF <- data.frame(predito_RN, pred_Lasso, pred_RF, pred_KNN, Y_teste)
+
+
+ggplot() + geom_point(data = DF, aes(x = as.matrix(Y_teste), y = as.matrix(pred_knn), col = "blue")) + 
+  geom_line(aes(x = X, y = Y, col = "black")) +
+  xlab("Y") + ylab("Preditos-KNN") + scale_color_manual(name = "Legenda", labels = c("Reta Identidade","Valor Predito vs. Valor Real"), values = c("black","blue"))+
+  theme_bw()
+
+ggplot() + geom_point(data = DF, aes(x = as.matrix(Y_teste), y = as.matrix(pred_Lasso), col = "blue")) + 
+  geom_line(aes(x = X, y = Y, col = "black")) +
+  xlab("Y") + ylab("Preditos-Lasso") + scale_color_manual(name = "Legenda", labels = c("Reta Identidade","Valor Predito vs. Valor Real"), values = c("black","blue"))+
+  theme_bw()
+
+ggplot() + geom_point(data = DF, aes(x = as.matrix(Y_teste), y = as.matrix(pred_RF), col = "blue")) + 
+  geom_line(aes(x = X, y = Y, col = "black")) +
+  xlab("Y") + ylab("Preditos-Random Forest") + scale_color_manual(name = "Legenda", labels = c("Reta Identidade","Valor Predito vs. Valor Real"), values = c("black","blue"))+
+  theme_bw()
+
+ggplot() + geom_point(data = DF, aes(x = as.matrix(Y_teste), y = as.matrix(predito_RN), col = "blue")) + 
+  geom_line(aes(x = X, y = Y, col = "black")) +
+  xlab("Y") + ylab("Preditos-Rede Neural") + scale_color_manual(name = "Legenda", labels = c("Reta Identidade","Valor Predito vs. Valor Real"), values = c("black","blue"))+
+  theme_bw()
+
+
+```
+
+k)Qual modelo teve melhores resultados? Leve em conta os erros-padrão nessa análise.
+
+```{r,warning=FALSE}
+
+```
+
+
+
+
+
+		
+
